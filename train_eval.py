@@ -66,13 +66,20 @@ def train(config, model, train_iter, dev_iter, test_iter):
                          warmup=0.05,
                          t_total=len(train_iter) * config.num_epochs)
     total_batch = 0  # 记录进行到多少batch
-    dev_best_loss = float('inf')
+    dev_best_loss = float('inf') #变量初始化为正无穷大
     last_improve = 0  # 记录上次验证集loss下降的batch数
     flag = False  # 记录是否很久没有效果提升
     model.train()
     for epoch in range(config.num_epochs):
         print('Epoch [{}/{}]'.format(epoch + 1, config.num_epochs))
         for i, (trains, labels) in enumerate(train_iter):
+            """
+            - `outputs = model(trains)`：将当前批次的训练数据输入模型，得到模型的输出。
+            - `loss = F.cross_entropy(outputs, labels)`：计算模型输出和真实标签之间的交叉熵损失。
+            - `loss.backward()`：计算损失关于模型参数的梯度。
+            - `optimizer.step()`：根据梯度更新模型参数。
+                model.zero_grad() 它将模型参数的所有梯度都设置为零。通常在计算损失函数关于模型参数的梯度之前，需要先执行这个函数，以避免累积之前迭代的梯度。
+            """
             outputs = model(trains)
             model.zero_grad()
             loss = F.cross_entropy(outputs, labels)
@@ -80,17 +87,31 @@ def train(config, model, train_iter, dev_iter, test_iter):
             optimizer.step()
             if total_batch % 100 == 0:
                 # 每多少轮输出在训练集和验证集上的效果
+                """
+                    这段代码是用来计算训练集上的准确率的。其中，labels 是训练集中的标签，
+                    outputs 是模型在训练集上的输出结果。首先，将 labels 转移到 CPU 上，并将其赋值给 true 变量。
+                    然后，使用 torch.max(outputs.data, 1)[1] 找到每个样本输出结果中概率最大的类别，
+                    并将其转移到 CPU 上，并将其赋值给 predic 变量。最后，使用 metrics.accuracy_score 
+                    函数计算 true 和 predic 之间的准确率，并将其赋值给 train_acc 变量。
+                """
                 true = labels.data.cpu()
                 predic = torch.max(outputs.data, 1)[1].cpu()
                 train_acc = metrics.accuracy_score(true, predic)
                 dev_acc, dev_loss = evaluate(config, model, dev_iter)
+                """
+                这段代码用于更新最佳模型参数。如果当前的验证集损失值 dev_loss 小于之前记录的最佳损失值 dev_best_loss，
+                则将 dev_best_loss 更新为当前的 dev_loss，并将当前的模型参数保存到指定的文件路径 config.save_path 中。
+                同时，将 improve 变量设置为 '*'，表示当前的模型性能有所改善。最后，将 last_improve 更新为当前的迭代次数 total_batch，以便在后续的训练过程中判断模型是否已经停止改善。
+                如果当前的 dev_loss 不小于 dev_best_loss，则将 improve 变量设置为空字符串。
+                """
                 if dev_loss < dev_best_loss:
-                    dev_best_loss = dev_loss
+                    dev_best_loss = dev_loss #将 dev_best_loss 设置为正无穷大可以确保在第一次更新模型参数时，当前的损失值一定小于 dev_best_loss，从而将当前的模型参数设置为最佳模型参数。
                     torch.save(model.state_dict(), config.save_path)
                     improve = '*'
-                    last_improve = total_batch
+                    last_improve = total_batch # 记录loss下降的batch
                 else:
                     improve = ''
+                
                 time_dif = get_time_dif(start_time)
                 msg = 'Iter: {0:>6},  Train Loss: {1:>5.2},  Train Acc: {2:>6.2%},  Val Loss: {3:>5.2},  Val Acc: {4:>6.2%},  Time: {5} {6}'
                 print(msg.format(total_batch, loss.item(), train_acc, dev_loss, dev_acc, time_dif, improve))
@@ -122,8 +143,15 @@ def test(config, model, test_iter):
     print("Time usage:", time_dif)
 
 
+"""
+这是一个用于评估模型性能的函数。输入参数包括模型、数据迭代器和配置信息。如果 test 参数为 True，则函数还会返回分类报告和混淆矩阵。
+在函数内部，首先将模型设置为评估模式（model.eval()）。然后，对于每个数据批次，使用模型计算输出结果，并计算损失值。
+同时，将标签转移到 CPU 上，并将预测结果转移到 CPU 上，并将它们添加到 labels_all 和 predict_all 数组中。最后，使用 metrics.accuracy_score 函数计算所有样本的准确率，并将其赋值给 acc 变量。
+如果 test 参数为 True，则还会计算分类报告和混淆矩阵，并将它们返回。分类报告包括每个类别的精确度、召回率和 F1 值等指标，混淆矩阵则显示了模型在每个类别上的分类情况。
+如果 test 参数为 False，则只返回准确率和平均损失值。
+"""
 def evaluate(config, model, data_iter, test=False):
-    model.eval()
+    model.eval()    #首先将模型设置为评估模式
     loss_total = 0
     predict_all = np.array([], dtype=int)
     labels_all = np.array([], dtype=int)
